@@ -1,0 +1,25 @@
+{
+  "name": "spine-viewer",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "本地 Spine 模型查看器：模型列表、播放控制、槽位开关与视频导出",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "vite build",
+    "build:pages": "vite build && node scripts/prepare-pages.mjs",
+    "preview": "vite preview --host 127.0.0.1",
+    "model:list": "node scripts/scan-model-library.mjs"
+  },
+  "dependencies": {
+    "@esotericsoftware/spine-webgl": "4.1.56",
+    "@esotericsoftware/spine-webgl-4.2": "npm:@esotericsoftware/spine-webgl@4.2.43",
+    "mp4-muxer": "^5.2.2",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "4.3.4",
+    "vite": "5.4.14"
+  }
+}
