@@ -58,6 +58,10 @@ export default function App() {
   const [frameOnly, setFrameOnly] = useState(false)
   const [background, setBackground] = useState(null)
   const [backgroundTransform, setBackgroundTransform] = useState(DEFAULT_BACKGROUND_TRANSFORM)
+  // 画面里额外添加的模型：当前选中那个始终显示，这里只存“额外添加”的部分。
+  const [stageModels, setStageModels] = useState([])
+  const [stageLayout, setStageLayout] = useState('stack')
+  const stageSeqRef = useRef(0)
   const objectUrlRef = useRef(null)
   const localUrlsRef = useRef([])
   const folderInputRef = useRef(null)
@@ -172,6 +176,25 @@ export default function App() {
     setLocalBackgrounds([])
     setImportNote('')
     setSelectedId('')
+    setStageModels([])
+  }
+
+  // 添加/移除画面模型。当前选中的模型已经在画面里，不重复添加。
+  function addToStage(model) {
+    if (!model) return
+    setStageModels((current) => {
+      if (current.some((item) => item.model.id === model.id)) return current
+      stageSeqRef.current += 1
+      return [...current, { key: `${model.id}#${stageSeqRef.current}`, model }]
+    })
+  }
+
+  function removeFromStage(key) {
+    setStageModels((current) => current.filter((item) => item.key !== key))
+  }
+
+  function clearStage() {
+    setStageModels([])
   }
 
   function toggleShowFrame() {
@@ -189,6 +212,15 @@ export default function App() {
   const allModels = useMemo(() => [...models, ...localModels], [models, localModels])
   const allBackgrounds = useMemo(() => [...backgrounds, ...localBackgrounds], [backgrounds, localBackgrounds])
 
+  // 模型库里被清掉（比如清空拖入）后，画面上的残留条目一并移除。
+  useEffect(() => {
+    setStageModels((current) => {
+      const ids = new Set(allModels.map((item) => item.id))
+      const next = current.filter((item) => ids.has(item.model.id))
+      return next.length === current.length ? current : next
+    })
+  }, [allModels])
+
   const filtered = useMemo(() => {
     const keyword = query.trim().toLowerCase()
     if (!keyword) return allModels
@@ -196,6 +228,13 @@ export default function App() {
   }, [allModels, query])
 
   const selected = filtered.find((model) => model.id === selectedId) || filtered[0] || null
+  const stageIds = useMemo(() => new Set(stageModels.map((item) => item.model.id)), [stageModels])
+  // 当前选中的模型本来就会画，固定到画面里只是让它换个选中后仍留在画面，
+  // 这里过滤掉，避免同一个模型被画两遍。
+  const stageExtras = useMemo(
+    () => stageModels.filter((item) => !selected || item.model.id !== selected.id),
+    [stageModels, selected],
+  )
 
   return (
     <div className="app" onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}>
@@ -244,22 +283,35 @@ export default function App() {
           {loading && <div className="hint">读取目录中…</div>}
           {error && <div className="error-box">{error}</div>}
           {!loading && !error && filtered.length === 0 && <div className="hint">没有匹配的模型。</div>}
-          {filtered.map((model) => (
-            <button
-              key={model.id}
-              className={'list-item' + (selected && selected.id === model.id ? ' selected' : '')}
-              onClick={() => setSelectedId(model.id)}
-              title={model.id}
-            >
-              <span className="item-name">{model.name}</span>
-              <span className="item-meta">
-                <span className="item-group">{model.group}</span>
-                {model.local && <span className="item-local">拖入</span>}
-                <span className="item-code">Spine {model.spineVersionFull || '?'}</span>
-              </span>
-              {model.issues.length > 0 && <span className="item-issue">{model.issues.join('；')}</span>}
-            </button>
-          ))}
+          {filtered.map((model) => {
+            const isSelected = selected && selected.id === model.id
+            const onStage = stageIds.has(model.id)
+            const addable = !onStage
+            return (
+              <div
+                key={model.id}
+                className={'list-item' + (isSelected ? ' selected' : '') + (onStage ? ' on-stage' : '')}
+              >
+                <button className="item-pick" onClick={() => setSelectedId(model.id)} title={model.id}>
+                  <span className="item-name">{model.name}</span>
+                  <span className="item-meta">
+                    <span className="item-group">{model.group}</span>
+                    {model.local && <span className="item-local">拖入</span>}
+                    <span className="item-code">Spine {model.spineVersionFull || '?'}</span>
+                  </span>
+                  {model.issues.length > 0 && <span className="item-issue">{model.issues.join('；')}</span>}
+                </button>
+                <button
+                  className={'item-add' + (onStage ? ' on' : '')}
+                  disabled={!addable}
+                  title={onStage ? '已在画面中' : isSelected ? '固定到画面：切换选中模型后仍保留' : '添加到画面'}
+                  onClick={() => addToStage(model)}
+                >
+                  {onStage ? '已在' : '＋ 画面'}
+                </button>
+              </div>
+            )
+          })}
         </div>
       </aside>
 
@@ -268,9 +320,10 @@ export default function App() {
           {selected
             ? (
               <SpineViewer
-                key={selected.id}
                 ref={viewerRef}
                 model={selected}
+                extras={stageExtras}
+                layout={stageLayout}
                 background={background}
                 backgroundTransform={backgroundTransform}
                 showFrame={showFrame}
@@ -279,6 +332,52 @@ export default function App() {
             )
             : <div className="empty">请从左侧选择一个模型。</div>}
         </div>
+        {selected && (
+          <div className="scene-bar">
+            <span className="scene-label">画面模型 {1 + stageExtras.length}</span>
+            {!stageIds.has(selected.id) && (
+              <span className="scene-chip current" title={selected.name}>
+                <span className="scene-chip-tag">当前</span>
+                <span className="scene-chip-name">{selected.name}</span>
+              </span>
+            )}
+            {stageModels.map((item) => {
+              const isCurrent = item.model.id === selected.id
+              return (
+                <span className={'scene-chip' + (isCurrent ? ' current' : '')} key={item.key} title={item.model.name}>
+                  {isCurrent && <span className="scene-chip-tag">当前</span>}
+                  <span className="scene-chip-name">{item.model.name}</span>
+                  <button
+                    className="scene-chip-remove"
+                    title={isCurrent ? '从画面列表移除（仍会显示当前模型）' : '从画面移除'}
+                    onClick={() => removeFromStage(item.key)}
+                  >×</button>
+                </span>
+              )
+            })}
+            <span className="scene-actions">
+              <button
+                className="bar-button"
+                disabled={stageIds.has(selected.id)}
+                title={stageIds.has(selected.id) ? '当前模型已在画面列表中' : '固定当前模型：切换选中模型后仍留在画面里'}
+                onClick={() => addToStage(selected)}
+              >
+                {stageIds.has(selected.id) ? '已在画面' : '添加到画面'}
+              </button>
+              <span className="layout-switch" title="多个模型的位置关系：堆叠保持各自原始坐标，并排则水平排开">
+                <button
+                  className={stageLayout === 'stack' ? 'active' : ''}
+                  onClick={() => setStageLayout('stack')}
+                >堆叠</button>
+                <button
+                  className={stageLayout === 'row' ? 'active' : ''}
+                  onClick={() => setStageLayout('row')}
+                >并排</button>
+              </span>
+              {stageModels.length > 0 && <button className="bar-button" onClick={clearStage}>清空</button>}
+            </span>
+          </div>
+        )}
         {selected && (
           <div className="path-bar">
             <strong>{selected.name}</strong>
